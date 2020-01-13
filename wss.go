@@ -3,6 +3,7 @@ package dfuse
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -12,22 +13,24 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
+const (
+	maxBufferSize = 2024
+	pingWait      = time.Second * 60
+)
+
 type wssClient struct {
 	cli  *Client
 	conn *websocket.Conn
 
-	mutex     *sync.Mutex
-	msgChan   chan interface{}
 	closeOnce sync.Once
-	handle    map[string]func()
+	msgChan   chan []byte
+	err       error
+	*action
 }
 
-var wssCli *wssClient
-
 func newWssClient(endpoint, token string) *wssClient {
-	wssCli = &wssClient{
-		msgChan: make(chan interface{}, 0),
-		handle:  make(map[string]func(), 0),
+	wssCli := &wssClient{
+		msgChan: make(chan []byte),
 	}
 
 	dail := websocket.Dialer{
@@ -42,52 +45,84 @@ func newWssClient(endpoint, token string) *wssClient {
 	}
 
 	wssCli.conn = conn
+	wssCli.action = &action{
+		readBytes: make([]byte, 0),
+		conn:      conn,
+		handle:    make(map[string]HandleCallback),
+	}
 
 	go wssCli.read()
+	go wssCli.publish()
 	return wssCli
+}
+
+func (c *wssClient) Error() error {
+	return c.err
 }
 
 func (c *wssClient) Close() {
 	c.closeOnce.Do(func() {
+		close(c.msgChan)
 		_ = c.conn.Close()
 	})
 }
 
 func (c *wssClient) read() {
+	//c.conn.SetReadLimit(maxBufferSize)
+	_ = c.conn.SetReadDeadline(time.Now().Add(pingWait))
+	c.conn.SetPingHandler(func(appData string) error {
+		fmt.Println(">>>执行到此")
+		pong := bytes.Replace([]byte(appData), []byte(`"ping"`), []byte(`"pong"`), 1)
+		_ = c.conn.WriteMessage(websocket.TextMessage, pong)
+		_ = c.conn.SetReadDeadline(time.Now().Add(pingWait))
+		return nil
+	})
+
 	for {
-		msgType, cnt, err := c.conn.ReadMessage()
+		msgType, context, err := c.conn.ReadMessage()
 		if err != nil {
-			panic(fmt.Sprintf("read message err%v", err))
-		}
+			if netErr, ok := err.(net.Error); ok {
+				if netErr.Timeout() {
+					c.err = fmt.Errorf("read message timeout remote :%v", c.conn.RemoteAddr())
+					continue
+				}
+			}
 
-		if msgType != websocket.TextMessage {
-			panic(fmt.Sprintf("msgtype invaild type%d", msgType))
-		}
-
-		var resp entity.CommonResp
-		if err := jsoniter.Unmarshal(cnt, &resp); err != nil {
-			panic(fmt.Sprintf("unmarshal err%v", err))
-		}
-
-		if resp.Type == "ping" {
-			pong := bytes.Replace(cnt, []byte(`"ping"`), []byte(`"pong"`), 1)
-			_ = c.conn.WriteMessage(websocket.TextMessage, pong)
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				fmt.Printf("read message fail expect err:%v \n", err)
+				continue
+			}
+			c.err = err
 			continue
 		}
 
-		fmt.Printf("receive msg:%s \n", string(cnt))
+		if msgType != websocket.TextMessage {
+			c.err = fmt.Errorf("invalid msg type:%d", msgType)
+			continue
+		}
+
+		c.msgChan <- context
 	}
 }
 
-func (c *wssClient) write(data interface{}) error {
-	reqBytes, err := jsoniter.Marshal(data)
-	if err != nil {
-		return err
-	}
+func (c *wssClient) publish() {
+	for msg := range c.msgChan {
+		var resp entity.CommonResp
+		if err := jsoniter.Unmarshal(msg, &resp); err != nil {
+			c.err = fmt.Errorf("unmarshal err:%v", err)
+			continue
+		}
 
-	if err := c.conn.WriteMessage(websocket.TextMessage, reqBytes); err != nil {
-		return err
-	}
+		switch resp.Type {
+		case Progress:
 
-	return nil
+		case UnListened:
+			c.action.UnListened()
+		case Error:
+			c.action.Error()
+		default:
+			//fmt.Printf("receive msg:%s \n", string(msg))
+			c.action.callback(resp.Type, resp.ReqId, string(msg))
+		}
+	}
 }

@@ -5,7 +5,6 @@ import (
 )
 
 type Client struct {
-	//*baseClient
 	*Options
 
 	wssOnce  sync.Once
@@ -26,16 +25,16 @@ func NewClient(opt *Options) *Client {
 
 func (c *Client) Wss() *wssClient {
 	c.wssOnce.Do(func() {
-		c.wssCli = newWssClient(c.Network.Endpoint, c.tokenStore.GetAuth().Token)
+		c.wssCli = newWssClient(c.Network.WssEndPoint(), c.tokenStore.GetAuth().Token)
 	})
 
 	return c.wssCli
 }
 
-// TODO
+// TODO 待定
 func (c *Client) Rest() *restClient {
 	c.restOnce.Do(func() {
-
+		c.restCli = newRestClient()
 	})
-	return nil
+	return c.restCli
 }
