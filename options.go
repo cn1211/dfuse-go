@@ -12,14 +12,17 @@ type Options struct {
 }
 
 func (opt *Options) init() {
+	opt.refreshToken()
+}
 
+// token refresh
+func (opt *Options) refreshToken() {
 	opt.tokenStore = &InMemoryTokenStore{}
 	auth := opt.tokenStore.GetAuth()
 	if auth == nil || auth.IsExpired() {
 		auth, err := fetchAuth(opt.ApiKey)
 		if err != nil {
 			panic(fmt.Sprintf("auth fail err:%v", err))
-			return
 		}
 		opt.tokenStore.SetAuth(auth)
 	}

@@ -27,40 +27,39 @@ func main() {
 		return
 	}
 
-	fmt.Println("success")
 	select {}
 }
 
 func getTableRows(cli *dfuse.Client) error {
 	var err error
-	f := func(respType string, payload dfuse.Payload) {
+	f := func(respType, message string) {
 		switch respType {
 		case dfuse.TableSnapshot:
-			resp, err := payload.TableSnapshot()
+			resp, err := cli.Wss().TableSnapshot()
 			if err != nil {
 				return
 			}
 			fmt.Printf("snapshot :%+v \n", resp)
 
 		case dfuse.TableDelta:
-			resp, err := payload.TableDelta()
+			resp, err := cli.Wss().TableDelta()
 			if err != nil {
 				return
 			}
 
-			fmt.Printf("delta :%+v \n", resp)
+			fmt.Printf("delta :%+v \n", resp.Data)
 			fmt.Printf("new :%+v \n", resp.Data.DBOP.New)
 			fmt.Printf("old :%+v \n", resp.Data.DBOP.Old)
 
 		case dfuse.Listening:
-			resp, err := payload.Listening()
+			resp, err := cli.Wss().Listening()
 			if err != nil {
 				return
 			}
 			fmt.Printf("listening :%+v \n", resp)
 
 		case dfuse.Progress:
-			resp, err := payload.Progress()
+			resp, err := cli.Wss().Progress()
 			if err != nil {
 				return
 			}
@@ -70,7 +69,7 @@ func getTableRows(cli *dfuse.Client) error {
 			fmt.Println("")
 
 		case dfuse.Error:
-			err := payload.Error()
+			err := cli.Wss().Error()
 			if err != nil {
 				return
 			}
@@ -95,8 +94,4 @@ func getTableRows(cli *dfuse.Client) error {
 		WithProgress:     5,
 	})
 	return err
-}
-
-func getTransactionLifecycle() error {
-	return nil
 }

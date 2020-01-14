@@ -25,7 +25,7 @@ func NewClient(opt *Options) *Client {
 
 func (c *Client) Wss() *wssClient {
 	c.wssOnce.Do(func() {
-		c.wssCli = newWssClient(c.Network.WssEndPoint(), c.tokenStore.GetAuth().Token)
+		c.wssCli = newWssClient(c.Network.WssEndPoint(), c.tokenStore.GetAuth().Token, c)
 	})
 
 	return c.wssCli

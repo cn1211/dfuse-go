@@ -2,8 +2,6 @@ package dfuse
 
 import "github.com/mohae/deepcopy"
 
-var DefaultCallback = &Callback{}
-
 type Callback struct {
 	processors []*CallbackProcessor
 }
@@ -20,7 +18,7 @@ type CallbackProcessor struct {
 	after   string
 	replace bool
 	remove  bool
-	kind    string
+	// kind    string
 
 	processor func()
 	parent    *Callback

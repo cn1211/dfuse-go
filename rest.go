@@ -1,7 +1,7 @@
 package dfuse
 
 type restClient struct {
-	cli *Client
+	// cli *Client
 }
 
 func newRestClient() *restClient {

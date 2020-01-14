@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/chenyihui555/dfuse-go/entity"
-
 	"github.com/gorilla/websocket"
 	jsoniter "github.com/json-iterator/go"
 )
@@ -19,36 +18,42 @@ const (
 )
 
 type wssClient struct {
-	cli  *Client
-	conn *websocket.Conn
-
-	closeOnce sync.Once
-	msgChan   chan []byte
-	err       error
+	*Client
+	*memoryCache
 	*action
+
+	conn      *websocket.Conn
+	dail      websocket.Dialer
+	mux       sync.Mutex
+	closeOnce sync.Once
+	sendChan  chan []byte
+	handle    map[string]handleCallback
 }
 
-func newWssClient(endpoint, token string) *wssClient {
+func newWssClient(endpoint, token string, cli *Client) *wssClient {
 	wssCli := &wssClient{
-		msgChan: make(chan []byte),
+		Client: cli,
+
+		handle:      make(map[string]handleCallback, 0),
+		memoryCache: NewMemoryCache(time.Second*30, time.Minute*5),
+		sendChan:    make(chan []byte, 0),
 	}
 
-	dail := websocket.Dialer{
-		HandshakeTimeout:  time.Second * 15,
+	wssCli.dail = websocket.Dialer{
+		HandshakeTimeout:  time.Second * 30,
 		EnableCompression: true,
 	}
 
 	u := fmt.Sprintf("%s?token=%s", endpoint, token)
-	conn, _, err := dail.Dial(u, nil)
+	conn, _, err := wssCli.dail.Dial(u, nil)
 	if err != nil {
 		panic(err)
 	}
 
 	wssCli.conn = conn
 	wssCli.action = &action{
-		readBytes: make([]byte, 0),
+		wssClient: wssCli,
 		conn:      conn,
-		handle:    make(map[string]HandleCallback),
 	}
 
 	go wssCli.read()
@@ -56,73 +61,106 @@ func newWssClient(endpoint, token string) *wssClient {
 	return wssCli
 }
 
-func (c *wssClient) Error() error {
-	return c.err
-}
-
-func (c *wssClient) Close() {
-	c.closeOnce.Do(func() {
-		close(c.msgChan)
-		_ = c.conn.Close()
+func (w *wssClient) Close() {
+	w.closeOnce.Do(func() {
+		close(w.action.sendChan)
+		_ = w.conn.Close()
 	})
 }
 
-func (c *wssClient) read() {
-	//c.conn.SetReadLimit(maxBufferSize)
-	_ = c.conn.SetReadDeadline(time.Now().Add(pingWait))
-	c.conn.SetPingHandler(func(appData string) error {
-		fmt.Println(">>>执行到此")
-		pong := bytes.Replace([]byte(appData), []byte(`"ping"`), []byte(`"pong"`), 1)
-		_ = c.conn.WriteMessage(websocket.TextMessage, pong)
-		_ = c.conn.SetReadDeadline(time.Now().Add(pingWait))
+func (w *wssClient) read() {
+
+	w.conn.SetReadLimit(maxBufferSize)
+	_ = w.conn.SetReadDeadline(time.Now().Add(pingWait))
+	w.conn.SetPingHandler(func(appData string) error {
+		_ = w.conn.SetReadDeadline(time.Now().Add(pingWait))
 		return nil
 	})
 
 	for {
-		msgType, context, err := c.conn.ReadMessage()
+		msgType, cnt, err := w.conn.ReadMessage()
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok {
 				if netErr.Timeout() {
-					c.err = fmt.Errorf("read message timeout remote :%v", c.conn.RemoteAddr())
+					fmt.Println("time out")
+					w.reconnect()
 					continue
 				}
 			}
 
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				fmt.Printf("read message fail expect err:%v \n", err)
-				continue
+				panic(fmt.Sprintf("read message fail expect err:%v", err))
 			}
-			c.err = err
+			fmt.Println("read message fail ", err)
+			w.reconnect()
 			continue
 		}
 
 		if msgType != websocket.TextMessage {
-			c.err = fmt.Errorf("invalid msg type:%d", msgType)
+			fmt.Printf("invalid msg type:%d \n", msgType)
 			continue
 		}
 
-		c.msgChan <- context
+		w.sendChan <- cnt
 	}
 }
 
-func (c *wssClient) publish() {
-	for msg := range c.msgChan {
+func (w *wssClient) reconnect() {
+	w.Options.refreshToken()
+	u := fmt.Sprintf("%s?token=%s", w.Network.WssEndPoint(), w.tokenStore.GetAuth().Token)
+	var err error
+	conn, _, err := w.dail.Dial(u, nil)
+	if err != nil {
+		panic(fmt.Sprintf("dail fail err:%v", err))
+	}
+
+	_ = w.conn.Close()
+	w.conn = conn
+	fmt.Println("reconnect success")
+}
+
+func (w *wssClient) publish() {
+	for msg := range w.sendChan {
 		var resp entity.CommonResp
 		if err := jsoniter.Unmarshal(msg, &resp); err != nil {
-			c.err = fmt.Errorf("unmarshal err:%v", err)
-			continue
+			panic(fmt.Sprint("unmarshal err", err))
 		}
 
 		switch resp.Type {
 		case Progress:
+			fmt.Println("progress:", string(msg))
+
+		case Ping:
+			pong := bytes.Replace([]byte(msg), []byte(`"ping"`), []byte(`"pong"`), 1)
+			_ = w.conn.WriteMessage(websocket.TextMessage, pong)
+			fmt.Println("ping:", string(msg))
 
 		case UnListened:
-			c.action.UnListened()
+			fmt.Println("unlistend:", string(msg))
+
+		case Listening:
+			fmt.Println("listening:", string(msg))
+
 		case Error:
-			c.action.Error()
+			fmt.Println("error:", string(msg))
+
 		default:
-			//fmt.Printf("receive msg:%s \n", string(msg))
-			c.action.callback(resp.Type, resp.ReqId, string(msg))
+			handle, has := w.handle[resp.ReqId]
+			if has {
+				handle(resp.Type, string(msg))
+			}
 		}
 	}
+}
+
+func (w *wssClient) write(param interface{}) error {
+	_ = w.conn.SetWriteDeadline(time.Now().Add(time.Second * 15))
+	writeBytes, err := jsoniter.Marshal(param)
+	if err != nil {
+		return err
+	}
+
+	w.mux.Lock()
+	defer w.mux.Unlock()
+	return w.conn.WriteMessage(websocket.TextMessage, writeBytes)
 }
