@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"reflect"
 	"sync"
 	"time"
 
@@ -13,8 +14,7 @@ import (
 )
 
 const (
-	maxBufferSize = 2024
-	pingWait      = time.Second * 60
+	pingWait = time.Second * 60
 )
 
 type wssClient struct {
@@ -22,21 +22,25 @@ type wssClient struct {
 	*memoryCache
 	*action
 
-	conn      *websocket.Conn
-	dail      websocket.Dialer
-	mux       sync.Mutex
-	closeOnce sync.Once
-	sendChan  chan []byte
-	handle    map[string]handleCallback
+	conn        *websocket.Conn
+	dail        websocket.Dialer
+	mux         sync.Mutex
+	closeOnce   sync.Once
+	sendChan    chan []byte
+	handle      map[string]callback
+	cacheReq    map[string][]byte
+	progressMap map[string]progress
 }
 
 func newWssClient(endpoint, token string, cli *Client) *wssClient {
 	wssCli := &wssClient{
 		Client: cli,
 
-		handle:      make(map[string]handleCallback, 0),
+		handle:      make(map[string]callback),
 		memoryCache: NewMemoryCache(time.Second*30, time.Minute*5),
-		sendChan:    make(chan []byte, 0),
+		sendChan:    make(chan []byte),
+		cacheReq:    make(map[string][]byte),
+		progressMap: make(map[string]progress),
 	}
 
 	wssCli.dail = websocket.Dialer{
@@ -58,19 +62,19 @@ func newWssClient(endpoint, token string, cli *Client) *wssClient {
 
 	go wssCli.read()
 	go wssCli.publish()
+	go wssCli.listeningProgress()
 	return wssCli
 }
 
 func (w *wssClient) Close() {
 	w.closeOnce.Do(func() {
+		w.batchUnListen()
 		close(w.action.sendChan)
 		_ = w.conn.Close()
 	})
 }
 
 func (w *wssClient) read() {
-
-	w.conn.SetReadLimit(maxBufferSize)
 	_ = w.conn.SetReadDeadline(time.Now().Add(pingWait))
 	w.conn.SetPingHandler(func(appData string) error {
 		_ = w.conn.SetReadDeadline(time.Now().Add(pingWait))
@@ -82,15 +86,18 @@ func (w *wssClient) read() {
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok {
 				if netErr.Timeout() {
-					fmt.Println("time out")
+					fmt.Println("time out ", time.Now().String())
 					w.reconnect()
 					continue
 				}
 			}
 
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				panic(fmt.Sprintf("read message fail expect err:%v", err))
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				fmt.Printf("read message fail expect err:%v \n", err)
+				w.reconnect()
+				continue
 			}
+
 			fmt.Println("read message fail ", err)
 			w.reconnect()
 			continue
@@ -114,8 +121,11 @@ func (w *wssClient) reconnect() {
 		panic(fmt.Sprintf("dail fail err:%v", err))
 	}
 
+	w.batchUnListen()
 	_ = w.conn.Close()
 	w.conn = conn
+	w.resubscribe()
+
 	fmt.Println("reconnect success")
 }
 
@@ -129,11 +139,15 @@ func (w *wssClient) publish() {
 		switch resp.Type {
 		case Progress:
 			fmt.Println("progress:", string(msg))
+			if progress, has := w.progressMap[resp.ReqId]; has {
+				progress.refreshTime()
+			}
 
 		case Ping:
 			pong := bytes.Replace([]byte(msg), []byte(`"ping"`), []byte(`"pong"`), 1)
-			_ = w.conn.WriteMessage(websocket.TextMessage, pong)
+			fmt.Println("pong:", string(pong))
 			fmt.Println("ping:", string(msg))
+			_ = w.conn.WriteMessage(websocket.TextMessage, pong)
 
 		case UnListened:
 			fmt.Println("unlistend:", string(msg))
@@ -145,6 +159,7 @@ func (w *wssClient) publish() {
 			fmt.Println("error:", string(msg))
 
 		default:
+			fmt.Println(">>>消息msg", string(msg))
 			handle, has := w.handle[resp.ReqId]
 			if has {
 				handle(resp.Type, string(msg))
@@ -153,14 +168,89 @@ func (w *wssClient) publish() {
 	}
 }
 
-func (w *wssClient) write(param interface{}) error {
-	_ = w.conn.SetWriteDeadline(time.Now().Add(time.Second * 15))
+func (w *wssClient) write(reqId string, param interface{}) error {
 	writeBytes, err := jsoniter.Marshal(param)
 	if err != nil {
 		return err
 	}
 
+	if w.isRepeatReq(reqId, writeBytes) {
+		return nil
+	}
+
 	w.mux.Lock()
 	defer w.mux.Unlock()
-	return w.conn.WriteMessage(websocket.TextMessage, writeBytes)
+
+	err = w.conn.WriteMessage(websocket.TextMessage, writeBytes)
+	if err != nil {
+		return err
+	}
+
+	w.cacheReq[reqId] = writeBytes // 记录用户请求数据,用于重新订阅
+	w.progressMap[reqId] = newProgress(reqId, time.Second*5)
+	return nil
+}
+
+func (w *wssClient) batchUnListen() {
+	for reqId := range w.handle {
+		if err := w.UnListen(reqId); err != nil {
+			fmt.Printf("unlisten err :%v \n", err)
+			continue
+		}
+	}
+}
+
+func (w *wssClient) resubscribe() {
+	if w.conn == nil {
+		return
+	}
+
+	for reqId, writeBytes := range w.cacheReq {
+		if err := w.conn.WriteMessage(websocket.TextMessage, writeBytes); err != nil {
+			fmt.Println("write message fail", err)
+			continue
+		}
+
+		w.progressMap[reqId] = newProgress(reqId, time.Second*5)
+	}
+}
+
+func (w *wssClient) registerCallback(reqId string, handle callback) {
+	w.handle[reqId] = handle
+}
+
+func (w *wssClient) listeningProgress() {
+	ticker := time.NewTicker(time.Second * 10)
+	defer ticker.Stop()
+
+	for nowTime := range ticker.C {
+		for reqId, progress := range w.progressMap {
+			if !progress.isTimeout(nowTime) {
+				continue
+			}
+
+			if err := w.UnListen(reqId); err != nil {
+				fmt.Printf("unlisten fail err:%+v \n", err)
+				continue
+			}
+
+			writeBytes, has := w.cacheReq[reqId]
+			if !has {
+				fmt.Println("reconnect fail not exist req cache ")
+				continue
+			}
+
+			if err := w.conn.WriteMessage(websocket.TextMessage, writeBytes); err != nil {
+				fmt.Println("write message fail", err)
+				continue
+			}
+
+			progress.refreshTime()
+		}
+	}
+}
+
+// checks for repeat requests
+func (w *wssClient) isRepeatReq(reqId string, writeBytes []byte) bool {
+	return reflect.DeepEqual(w.cacheReq[reqId], writeBytes)
 }

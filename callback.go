@@ -18,7 +18,7 @@ type CallbackProcessor struct {
 	after   string
 	replace bool
 	remove  bool
-	// kind    string
+	kind    string
 
 	processor func()
 	parent    *Callback

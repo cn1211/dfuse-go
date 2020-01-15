@@ -6,7 +6,6 @@ import (
 	"github.com/chenyihui555/dfuse-go/entity"
 	"github.com/gorilla/websocket"
 	jsoniter "github.com/json-iterator/go"
-	uuid "github.com/satori/go.uuid"
 )
 
 type action struct {
@@ -15,31 +14,47 @@ type action struct {
 	conn *websocket.Conn
 }
 
-type handleCallback func(string, string)
+type callback func(string, string)
 
-func (a *action) GetTableRows(request *entity.GetTableRows, handle handleCallback, opt *entity.OptionReq) error {
+var defaultOptionReq = &entity.OptionReq{
+	Fetch:            true,
+	Listen:           true,
+	StartBlock:       0,
+	IrreversibleOnly: true,
+	WithProgress:     1,
+}
+
+func (a *action) GetTableRows(reqId string, request *entity.GetTableRows, handle callback, opt *entity.OptionReq) error {
+	if opt == nil {
+		opt = defaultOptionReq
+	}
+
 	param := entity.TableRowsReq{
 		CommonReq: entity.CommonReq{
 			Type:      GetTableRows,
-			ReqId:     uuid.NewV4().String(),
+			ReqId:     reqId,
 			OptionReq: opt,
 		},
 		Data: *request,
 	}
 
-	if err := a.write(param); err != nil {
+	if err := a.write(reqId, param); err != nil {
 		return err
 	}
 
-	a.handle[param.ReqId] = handle
+	a.registerCallback(reqId, handle)
 	return nil
 }
 
-func (a *action) GetTransactionLifecycle(txHash string, handle handleCallback, opt *entity.OptionReq) error {
+func (a *action) GetTransactionLifecycle(reqId, txHash string, handle callback, opt *entity.OptionReq) error {
+	if opt == nil {
+		opt = defaultOptionReq
+	}
+
 	param := entity.TransactionLifecycleReq{
 		CommonReq: entity.CommonReq{
 			Type:      TransactionLifecycle,
-			ReqId:     uuid.NewV4().String(),
+			ReqId:     reqId,
 			OptionReq: opt,
 		},
 		Data: struct {
@@ -49,14 +64,15 @@ func (a *action) GetTransactionLifecycle(txHash string, handle handleCallback, o
 		},
 	}
 
-	if err := a.write(param); err != nil {
+	if err := a.write(reqId, param); err != nil {
 		return err
 	}
 
-	a.handle[param.ReqId] = handle
+	a.registerCallback(reqId, handle)
 	return nil
 }
 
+// interrupt stream
 func (a *action) UnListen(reqId string) error {
 	param := entity.UnListenReq{
 		Type: UnListen,
@@ -67,7 +83,12 @@ func (a *action) UnListen(reqId string) error {
 		},
 	}
 
-	return a.write(param)
+	writeBytes, err := jsoniter.Marshal(param)
+	if err != nil {
+		return err
+	}
+
+	return a.conn.WriteMessage(websocket.TextMessage, writeBytes)
 }
 
 func (a *action) TableSnapshot() (*entity.TableSnapshotResp, error) {

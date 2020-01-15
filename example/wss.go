@@ -39,6 +39,7 @@ func getTableRows(cli *dfuse.Client) error {
 			if err != nil {
 				return
 			}
+
 			fmt.Printf("snapshot :%+v \n", resp)
 
 		case dfuse.TableDelta:
@@ -80,14 +81,14 @@ func getTableRows(cli *dfuse.Client) error {
 		}
 	}
 
-	err = cli.Wss().GetTableRows(&entity.GetTableRows{
+	err = cli.Wss().GetTableRows("wss-test", &entity.GetTableRows{
 		Code:  "zheshimatch1",
-		Scope: "gou2eos",
-		Table: "oribuy",
-		Json:  false,
+		Scope: "pizza2usde",
+		Table: "order",
+		Json:  true,
 		Limit: 10,
 	}, f, &entity.OptionReq{
-		Fetch:            true,
+		Fetch:            false,
 		Listen:           true,
 		StartBlock:       0,
 		IrreversibleOnly: false,
