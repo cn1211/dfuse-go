@@ -6,5 +6,5 @@ type TableOp struct {
 	Payer       string `json:"payer"`
 	Path        string `json:"path"`
 
-	chunks []string
+	// chunks []string
 }

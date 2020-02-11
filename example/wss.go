@@ -33,6 +33,11 @@ func main() {
 func getTableRows(cli *dfuse.Client) error {
 	var err error
 	f := func(respType, message string) {
+		if err != nil {
+			fmt.Println("err:", err)
+			return
+		}
+
 		switch respType {
 		case dfuse.TableSnapshot:
 			resp, err := cli.Wss().TableSnapshot()
@@ -52,32 +57,30 @@ func getTableRows(cli *dfuse.Client) error {
 			fmt.Printf("new :%+v \n", resp.Data.DBOP.New)
 			fmt.Printf("old :%+v \n", resp.Data.DBOP.Old)
 
-		case dfuse.Listening:
-			resp, err := cli.Wss().Listening()
-			if err != nil {
-				return
-			}
-			fmt.Printf("listening :%+v \n", resp)
-
-		case dfuse.Progress:
-			resp, err := cli.Wss().Progress()
-			if err != nil {
-				return
-			}
-			fmt.Printf("progress :%+v \n", resp)
-
-		case dfuse.Ping:
-			fmt.Println("")
+		//case dfuse.Listening:
+		//	resp, err := cli.Wss().Listening()
+		//	if err != nil {
+		//		return
+		//	}
+		//	fmt.Printf("listening :%+v \n", resp)
+		//
+		//case dfuse.Progress:
+		//	resp, err := cli.Wss().Progress()
+		//	if err != nil {
+		//		return
+		//	}
+		//	fmt.Printf("progress :%+v \n", resp)
+		//
+		//case dfuse.Ping:
+		//	fmt.Println("")
 
 		case dfuse.Error:
 			err := cli.Wss().Error()
-			if err != nil {
-				return
-			}
 			fmt.Printf("err :%+v \n", err)
 
 		default:
-			err = fmt.Errorf("invalid type :%s", respType)
+			err = fmt.Errorf("invalid type %s", respType)
+			fmt.Println("error", err)
 		}
 	}
 

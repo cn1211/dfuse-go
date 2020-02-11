@@ -1,20 +1,15 @@
 package dfuse
 
 import (
-	"github.com/pkg/errors"
+	"fmt"
 
 	"github.com/chenyihui555/dfuse-go/entity"
-	"github.com/gorilla/websocket"
 	jsoniter "github.com/json-iterator/go"
 )
 
 type action struct {
 	*wssClient
-
-	conn *websocket.Conn
 }
-
-type callback func(string, string)
 
 var defaultOptionReq = &entity.OptionReq{
 	Fetch:            true,
@@ -38,12 +33,11 @@ func (a *action) GetTableRows(reqId string, request *entity.GetTableRows, handle
 		Data: *request,
 	}
 
-	if err := a.write(reqId, param); err != nil {
-		return err
+	if _, has := a.wssCli.subscriberMap[reqId]; has {
+		return fmt.Errorf("req id already exists :%s", reqId)
 	}
 
-	a.registerCallback(reqId, handle)
-	return nil
+	return a.subscribe(reqId, GetTableRows, param, handle)
 }
 
 func (a *action) GetTransactionLifecycle(reqId, txHash string, handle callback, opt *entity.OptionReq) error {
@@ -64,15 +58,14 @@ func (a *action) GetTransactionLifecycle(reqId, txHash string, handle callback, 
 		},
 	}
 
-	if err := a.write(reqId, param); err != nil {
-		return err
+	if _, has := a.wssCli.subscriberMap[reqId]; has {
+		return fmt.Errorf("req id already exists :%s", reqId)
 	}
 
-	a.registerCallback(reqId, handle)
-	return nil
+	return a.subscribe(reqId, TransactionLifecycle, param, handle)
 }
 
-// interrupt stream
+// interrupt subscribe stream
 func (a *action) UnListen(reqId string) error {
 	param := entity.UnListenReq{
 		Type: UnListen,
@@ -83,12 +76,15 @@ func (a *action) UnListen(reqId string) error {
 		},
 	}
 
-	writeBytes, err := jsoniter.Marshal(param)
+	sendBytes, err := jsoniter.Marshal(param)
 	if err != nil {
 		return err
 	}
 
-	return a.conn.WriteMessage(websocket.TextMessage, writeBytes)
+	a.sendChan <- sendBytes
+
+	a.unsubscribe(reqId)
+	return nil
 }
 
 func (a *action) TableSnapshot() (*entity.TableSnapshotResp, error) {
@@ -132,5 +128,5 @@ func (a *action) Listening() (*entity.ListeningResp, error) {
 }
 
 func (a *action) Error() error {
-	return errors.New("")
+	return a.err
 }

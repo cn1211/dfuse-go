@@ -70,7 +70,3 @@ type Authorization struct {
 func (a *Authorization) IsExpired() bool {
 	return a.ExpiresAt.After(time.Now())
 }
-
-func SetAuthEndpoint(endpoint string) {
-	AuthEndpoint = endpoint
-}

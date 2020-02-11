@@ -8,8 +8,8 @@ type progress struct {
 	nextTime time.Time
 }
 
-func newProgress(reqId string, interval time.Duration) progress {
-	return progress{
+func newProgress(reqId string, interval time.Duration) *progress {
+	return &progress{
 		reqId:    reqId,
 		interval: interval,
 		nextTime: time.Now().Add(interval),
