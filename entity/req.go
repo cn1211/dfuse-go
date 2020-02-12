@@ -11,7 +11,7 @@ type CommonReq struct {
 type OptionReq struct {
 	Fetch            bool `json:"fetch"`             // 是否捕捉快照(仅支持get_table_rows,get_transaction)
 	Listen           bool `json:"listen"`            // 是否监听请求流后续的改变
-	StartBlock       int  `json:"start_block"`       // 开始监听的区块高度
+	StartBlock       int  `json:"start_block"`       // 开始监听的区块高度(0代表当前区块 负数:例-200表示当前区块往前200个区块 正数:例200代表从整条eos链的第200个区块开始输送(需要额外的key))
 	IrreversibleOnly bool `json:"irreversible_only"` // 是否只输出不可逆区块
 	WithProgress     int  `json:"with_progress"`     // 区块输出之间的间隔
 }

@@ -1,65 +1,74 @@
 package dfuse
 
-//
-//import "github.com/mohae/deepcopy"
-//
-//type Callback struct {
-//	processors []*CallbackProcessor
-//}
-//
-//func (c *Callback) clone() *Callback {
-//	return &Callback{
-//		processors: deepcopy.Copy(c.processors).([]*CallbackProcessor),
-//	}
-//}
-//
-//type CallbackProcessor struct {
-//	name    string
-//	before  string
-//	after   string
-//	replace bool
-//	remove  bool
-//	//kind    string
-//
-//	processor func()
-//	parent    *Callback
-//}
-//
-//func (c *CallbackProcessor) Before(callbackName string) *CallbackProcessor {
-//	c.before = callbackName
-//	return c
-//}
-//
-//func (c *CallbackProcessor) After(callbackName string) *CallbackProcessor {
-//	c.after = callbackName
-//	return c
-//}
-//
-//func (c *CallbackProcessor) Register(callbackName string, callback func()) {
-//	c.name = callbackName
-//	c.processor = callback
-//	c.parent.processors = append(c.parent.processors, c)
-//}
-//
-//func (c *CallbackProcessor) Remove(callbackName string) {
-//	c.name = callbackName
-//	c.processor = func() {}
-//	c.remove = true
-//	c.parent.processors = append(c.parent.processors, c)
-//}
-//
-//func (c *CallbackProcessor) Replace(callbackName string) {
-//	c.name = callbackName
-//	c.processor = func() {}
-//	c.replace = true
-//	c.parent.processors = append(c.parent.processors, c)
-//}
-//
-//func (c *CallbackProcessor) Get(callbackName string) (callback func()) {
-//	for _, process := range c.parent.processors {
-//		if process.name == callbackName && !process.remove {
-//			return process.processor
-//		}
-//	}
-//	return nil
-//}
+import (
+	"github.com/chenyihui555/dfuse-go/entity"
+	jsoniter "github.com/json-iterator/go"
+)
+
+type Callback struct {
+	msgBytes []byte
+}
+
+func newCallback() *Callback {
+	return &Callback{msgBytes: make([]byte, 0)}
+}
+
+func (c *Callback) TableSnapshot() (*entity.TableSnapshotResp, error) {
+	snapshot := entity.TableSnapshotResp{}
+	if err := jsoniter.Unmarshal(c.msgBytes, &snapshot); err != nil {
+		return nil, err
+	}
+	return &snapshot, nil
+}
+
+func (c *Callback) TableDelta() (*entity.TableDeltaResp, error) {
+	delta := entity.TableDeltaResp{}
+	if err := jsoniter.Unmarshal(c.msgBytes, &delta); err != nil {
+		return nil, err
+	}
+	return &delta, nil
+}
+
+func (c *Callback) TransactionLifecycle() (*entity.TransactionLifecycleResp, error) {
+	lifecycleResp := entity.TransactionLifecycleResp{}
+	if err := jsoniter.Unmarshal(c.msgBytes, &lifecycleResp); err != nil {
+		return nil, err
+	}
+	return &lifecycleResp, nil
+}
+
+func (c *Callback) Progress() (*entity.ProgressResp, error) {
+	progressResp := entity.ProgressResp{}
+	if err := jsoniter.Unmarshal(c.msgBytes, &progressResp); err != nil {
+		return nil, err
+	}
+	return &progressResp, nil
+}
+
+func (c *Callback) Listening() (*entity.ListeningResp, error) {
+	listenResp := entity.ListeningResp{}
+	if err := jsoniter.Unmarshal(c.msgBytes, &listenResp); err != nil {
+		return nil, err
+	}
+	return &listenResp, nil
+}
+
+func (c *Callback) Error() (*entity.ErrorResp, error) {
+	errResp := entity.ErrorResp{}
+	if err := jsoniter.Unmarshal(c.msgBytes, &errResp); err != nil {
+		return nil, err
+	}
+	return &errResp, nil
+}
+
+// TODO
+func (c *Callback) ActionTraces() (interface{}, error) {
+
+	return nil, nil
+}
+
+// TODO
+func (c *Callback) HeadInfo() (interface{}, error) {
+
+	return nil, nil
+}

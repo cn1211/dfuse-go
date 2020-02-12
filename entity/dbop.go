@@ -8,14 +8,14 @@ type DBOp struct {
 	Table       string `json:"table,omitempty"`   // 表名
 	Scope       string `json:"scope,omitempty"`   // scope
 	Key         string `json:"key,omitempty"`     // 表的主键
-	Old         *DBRow `json:"old,omitempty"`     //
-	New         *DBRow `json:"new,omitempty"`     //
+	Old         *DBRow `json:"old,omitempty"`     // 旧的行数据(删除、更新时触发)
+	New         *DBRow `json:"new,omitempty"`     // 新的行数据(插入、更新时触发)
 }
 
 // database row data
 type DBRow struct {
-	Payer string      `json:"payer,omitempty"`
-	Hex   string      `json:"hex,omitempty"`
-	JSON  interface{} `json:"json,omitempty"`
-	Error string      `json:"error,omitempty"`
+	Payer string      `json:"payer,omitempty"` // 执行者
+	Hex   string      `json:"hex,omitempty"`   // 二进制数据的十六进制编码的字符串
+	JSON  interface{} `json:"json,omitempty"`  // 数据对象
+	Error string      `json:"error,omitempty"` // 错误信息
 }

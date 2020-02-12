@@ -32,15 +32,10 @@ func main() {
 
 func getTableRows(cli *dfuse.Client) error {
 	var err error
-	f := func(respType, message string) {
-		if err != nil {
-			fmt.Println("err:", err)
-			return
-		}
-
+	f := func(respType string, callback *dfuse.Callback) {
 		switch respType {
 		case dfuse.TableSnapshot:
-			resp, err := cli.Wss().TableSnapshot()
+			resp, err := callback.TableSnapshot()
 			if err != nil {
 				return
 			}
@@ -48,35 +43,36 @@ func getTableRows(cli *dfuse.Client) error {
 			fmt.Printf("snapshot :%+v \n", resp)
 
 		case dfuse.TableDelta:
-			resp, err := cli.Wss().TableDelta()
+			delta, err := callback.TableDelta()
 			if err != nil {
 				return
 			}
+			fmt.Printf("delta :%+v \n", delta.Data)
+			fmt.Printf("key :%+v \n", delta.Data.DBOP.Key)
+			fmt.Printf("new :%+v \n", delta.Data.DBOP.New)
+			fmt.Printf("old :%+v \n", delta.Data.DBOP.Old)
 
-			fmt.Printf("delta :%+v \n", resp.Data)
-			fmt.Printf("new :%+v \n", resp.Data.DBOP.New)
-			fmt.Printf("old :%+v \n", resp.Data.DBOP.Old)
+		case dfuse.Listening:
+			resp, err := callback.Listening()
+			if err != nil {
+				return
+			}
+			fmt.Printf("listening :%+v \n", resp)
 
-		//case dfuse.Listening:
-		//	resp, err := cli.Wss().Listening()
-		//	if err != nil {
-		//		return
-		//	}
-		//	fmt.Printf("listening :%+v \n", resp)
-		//
-		//case dfuse.Progress:
-		//	resp, err := cli.Wss().Progress()
-		//	if err != nil {
-		//		return
-		//	}
-		//	fmt.Printf("progress :%+v \n", resp)
-		//
-		//case dfuse.Ping:
-		//	fmt.Println("")
+		case dfuse.Progress:
+			resp, err := callback.Progress()
+			if err != nil {
+				return
+			}
+			fmt.Printf("progress :%+v \n", resp)
 
 		case dfuse.Error:
-			err := cli.Wss().Error()
-			fmt.Printf("err :%+v \n", err)
+			resp, err := callback.Error()
+			if err != nil {
+				fmt.Printf("err :%+v \n", err)
+				return
+			}
+			fmt.Printf("stream error info :%+v \n", resp)
 
 		default:
 			err = fmt.Errorf("invalid type %s", respType)
@@ -84,10 +80,10 @@ func getTableRows(cli *dfuse.Client) error {
 		}
 	}
 
-	err = cli.Wss().GetTableRows("wss-test", &entity.GetTableRows{
+	err = cli.Wss().GetTableRows("wss-ori-test", &entity.GetTableRows{
 		Code:  "zheshimatch1",
 		Scope: "pizza2usde",
-		Table: "order",
+		Table: "sell",
 		Json:  true,
 		Limit: 10,
 	}, f, &entity.OptionReq{
@@ -95,7 +91,7 @@ func getTableRows(cli *dfuse.Client) error {
 		Listen:           true,
 		StartBlock:       0,
 		IrreversibleOnly: false,
-		WithProgress:     5,
+		WithProgress:     10,
 	})
 	return err
 }

@@ -2,6 +2,7 @@ package dfuse
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -12,8 +13,8 @@ import (
 )
 
 const (
-	pongWait   = time.Second * 60
-	pingPeriod = (pongWait * 9) / 10
+	pongWait = time.Second * 60
+	//pingPeriod = (pongWait * 9) / 10
 )
 
 type wssClient struct {
@@ -25,23 +26,20 @@ type wssClient struct {
 	closeOnce sync.Once
 	sendChan  chan []byte
 	cacheReq  map[string][]byte
-	errChan   chan error
 	notify    chan os.Signal
-	err       error
 
-	hub           *Hub
-	subscriberMap map[string]*subscribe
+	hub          *Hub
+	subscribeMap map[string]*subscribe
 }
 
 func newWssClient(endpoint, token string, cli *Client) *wssClient {
 	wssCli := &wssClient{
 		Client: cli,
 
-		sendChan:      make(chan []byte),
-		cacheReq:      make(map[string][]byte),
-		errChan:       make(chan error),
-		notify:        make(chan os.Signal, 1),
-		subscriberMap: make(map[string]*subscribe),
+		sendChan:     make(chan []byte),
+		cacheReq:     make(map[string][]byte),
+		notify:       make(chan os.Signal, 1),
+		subscribeMap: make(map[string]*subscribe),
 	}
 
 	wssCli.dail = websocket.Dialer{
@@ -71,7 +69,6 @@ func newWssClient(endpoint, token string, cli *Client) *wssClient {
 func (w *wssClient) Close() {
 	w.closeOnce.Do(func() {
 		close(w.sendChan)
-		close(w.errChan)
 		_ = w.conn.Close()
 	})
 }
@@ -92,7 +89,7 @@ func (w *wssClient) read() {
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok {
 				if netErr.Timeout() {
-					fmt.Println("time out ", time.Now().String())
+					log.Println("time out ", time.Now().String())
 					w.reconnect()
 					continue
 				}
@@ -100,17 +97,17 @@ func (w *wssClient) read() {
 
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				// goingaway:页面跳转  abnormal:断网.没有收到帧
-				fmt.Printf("read message fail expect err:%v \n", err)
+				log.Printf("read message fail expect err:%v \n", err)
 				w.reconnect()
 				continue
 			}
 
-			fmt.Println("read message fail ", err)
+			log.Println("read message fail ", err)
 			continue
 		}
 
 		if msgType != websocket.TextMessage {
-			fmt.Printf("invalid msg type:%d \n", msgType)
+			log.Printf("invalid msg type:%d \n", msgType)
 			continue
 		}
 
@@ -124,14 +121,16 @@ func (w *wssClient) reconnect() {
 
 	conn, _, err := w.dail.Dial(u, nil)
 	if err != nil {
-		panic(fmt.Sprintf("dail fail err:%v", err))
+		log.Println("websocket dail fail :", err)
+		time.Sleep(time.Second * 3)
+		w.reconnect()
 	}
 
 	_ = w.conn.Close()
 	w.conn = conn
 	w.resubscribe()
 
-	fmt.Println("reconnect success")
+	log.Println("reconnect success")
 }
 
 func (w *wssClient) write() {
@@ -142,19 +141,18 @@ func (w *wssClient) write() {
 	for {
 		select {
 		case <-w.notify:
-			fmt.Println("interrupt")
+			log.Println("interrupt")
 			err := w.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			if err != nil {
-				fmt.Println("write close message err", err)
-				w.errChan <- err
-				w.err = err
+				log.Println("write close message err", err)
 				return
 			}
 
 		case msg := <-w.sendChan:
+			//log.Println("send chan msg :", string(msg))
 			err := w.conn.WriteMessage(websocket.TextMessage, msg)
 			if err != nil {
-				fmt.Println("write text message err", err)
+				log.Println("write text message err", err)
 				return
 			}
 		}
@@ -164,28 +162,27 @@ func (w *wssClient) write() {
 
 // resubscribe
 func (w *wssClient) resubscribe() {
-	for reqId, subscriber := range w.subscriberMap {
+	for reqId, subscriber := range w.subscribeMap {
 		w.sendChan <- subscriber.reqCache
-		subscriber.progress = newProgress(reqId, time.Second*10)
+		subscriber.progress = newProgress(reqId, subscriber.progress.interval)
 	}
 }
 
 // subscribe
-func (w *wssClient) subscribe(reqId, actionType string, param interface{}, handle callback) error {
-	subscriber, err := newSubscribe(reqId, actionType, param, handle, w, w.hub)
+func (w *wssClient) subscribe(reqId, actionType string, intervalBlock int, param interface{}, handle callbackFunc) error {
+	subscriber, err := newSubscribe(reqId, actionType, intervalBlock, param, handle, w, w.hub)
 	if err != nil {
 		return err
 	}
-	w.wssCli.subscriberMap[reqId] = subscriber
-	w.hub.register <- subscriber
+	w.wssCli.subscribeMap[reqId] = subscriber
 	return nil
 }
 
 // unsubscribe
 func (w *wssClient) unsubscribe(reqId string) {
-	if subscriber, has := w.subscriberMap[reqId]; has {
+	if subscriber, has := w.subscribeMap[reqId]; has {
 		w.hub.unregister <- subscriber
-		delete(w.subscriberMap, reqId)
+		delete(w.subscribeMap, reqId)
 		subscriber.Close()
 	}
 }

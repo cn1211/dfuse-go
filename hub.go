@@ -15,8 +15,8 @@ func newHub(cli *wssClient) *Hub {
 		broadcast:   make(chan []byte),
 		subscribers: make(map[*subscribe]bool),
 
-		register:   make(chan *subscribe),
-		unregister: make(chan *subscribe),
+		register:   make(chan *subscribe, 1),
+		unregister: make(chan *subscribe, 1),
 	}
 }
 
@@ -26,15 +26,15 @@ func (h *Hub) run() {
 		case subscriber := <-h.register:
 			h.subscribers[subscriber] = true
 
-		case client := <-h.unregister:
-			if _, exist := h.subscribers[client]; exist {
-				delete(h.subscribers, client)
+		case subscriber := <-h.unregister:
+			if _, exist := h.subscribers[subscriber]; exist {
+				delete(h.subscribers, subscriber)
 			}
 
 		case msg := <-h.broadcast:
 			for client, exist := range h.subscribers {
 				if exist {
-					client.callback(msg)
+					client.distribute(msg)
 				} else {
 					delete(h.subscribers, client)
 				}
