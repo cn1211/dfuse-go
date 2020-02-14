@@ -62,6 +62,10 @@ func (s *subscribe) distribute(sendBytes []byte) {
 		return
 	}
 
+	if resp.ReqId != s.reqId {
+		return
+	}
+
 	if resp.Type == Ping {
 		pong := bytes.Replace(sendBytes, []byte(`"ping"`), []byte(`"pong"`), 1)
 		s.cli.sendChan <- pong

@@ -50,7 +50,8 @@ func getTableRows(cli *dfuse.Client) error {
 			fmt.Printf("delta :%+v \n", delta.Data)
 			fmt.Printf("key :%+v \n", delta.Data.DBOP.Key)
 			fmt.Printf("new :%+v \n", delta.Data.DBOP.New)
-			fmt.Printf("old :%+v \n", delta.Data.DBOP.Old)
+			//fmt.Printf("old :%+v \n", string(delta.Data.DBOP.Old.JSON))
+			fmt.Printf("old :%+v \n", delta.Data.DBOP.Old.JSON)
 
 		case dfuse.Listening:
 			resp, err := callback.Listening()
