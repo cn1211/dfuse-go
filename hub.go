@@ -27,7 +27,7 @@ func (h *Hub) run() {
 			h.subscribers[subscriber] = true
 
 		case subscriber := <-h.unregister:
-			if _, exist := h.subscribers[subscriber]; exist {
+			if exist := h.subscribers[subscriber]; exist {
 				delete(h.subscribers, subscriber)
 			}
 

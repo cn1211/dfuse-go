@@ -2,7 +2,6 @@ package dfuse
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -89,7 +89,7 @@ func (w *wssClient) read() {
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok {
 				if netErr.Timeout() {
-					log.Println("time out ", time.Now().String())
+					logrus.Error("time out ", time.Now().String())
 					w.reconnect()
 					continue
 				}
@@ -97,17 +97,17 @@ func (w *wssClient) read() {
 
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				// goingaway:页面跳转  abnormal:断网.没有收到帧
-				log.Printf("read message fail expect err:%v \n", err)
+				logrus.Errorf("read message fail expect err:%v \n", err)
 				w.reconnect()
 				continue
 			}
 
-			log.Println("read message fail ", err)
+			logrus.Error("read message fail ", err)
 			continue
 		}
 
 		if msgType != websocket.TextMessage {
-			log.Printf("invalid msg type:%d \n", msgType)
+			logrus.Errorf("invalid msg type:%d \n", msgType)
 			continue
 		}
 
@@ -121,7 +121,7 @@ func (w *wssClient) reconnect() {
 
 	conn, _, err := w.dail.Dial(u, nil)
 	if err != nil {
-		log.Println("websocket dail fail :", err)
+		logrus.Errorf("reconnet fail websocket connet ", err)
 		time.Sleep(time.Second * 3)
 		w.reconnect()
 	}
@@ -130,7 +130,7 @@ func (w *wssClient) reconnect() {
 	w.conn = conn
 	w.resubscribe()
 
-	log.Println("reconnect success")
+	logrus.Info("reconnect success")
 }
 
 func (w *wssClient) write() {
@@ -141,19 +141,21 @@ func (w *wssClient) write() {
 	for {
 		select {
 		case <-w.notify:
-			log.Println("interrupt")
+			logrus.Infoln("interrupt")
 			err := w.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			if err != nil {
-				log.Println("write close message err", err)
+				logrus.Error("write close message err", err)
 				return
 			}
 
 		case msg := <-w.sendChan:
-			//log.Println("send chan msg :", string(msg))
+			if w.conn == nil {
+				logrus.Info("server 重连中...")
+			}
+
 			err := w.conn.WriteMessage(websocket.TextMessage, msg)
 			if err != nil {
-				log.Println("write text message err", err)
-				return
+				logrus.Error("write text message err", err)
 			}
 		}
 	}

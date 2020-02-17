@@ -3,12 +3,13 @@ package dfuse
 import (
 	"bytes"
 	"context"
-	"log"
+
 	"sync"
 	"time"
 
 	"github.com/chenyihui555/dfuse-go/entity"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/sirupsen/logrus"
 )
 
 type callbackFunc func(string, *Callback)
@@ -58,7 +59,7 @@ func newSubscribe(reqId, actionType string, intervalBlock int, param interface{}
 func (s *subscribe) distribute(sendBytes []byte) {
 	var resp entity.CommonResp
 	if err := jsoniter.Unmarshal(sendBytes, &resp); err != nil {
-		log.Println("unmarshal err :", err)
+		logrus.Error("unmarshal err", err)
 		return
 	}
 
@@ -87,7 +88,17 @@ func (s *subscribe) Close() {
 }
 
 func (s *subscribe) monitorProgress() {
-	ticker := time.NewTicker(s.progress.interval * 9 / 10)
+	var interval time.Duration
+	switch {
+	case s.progress.interval <= 10:
+		interval = time.Minute
+	case 10 <= s.progress.interval && s.progress.interval <= 60:
+		interval = s.progress.interval * 3 / 5
+	case 60 < s.progress.interval:
+		interval = s.progress.interval * 5
+	}
+
+	ticker := time.NewTicker(interval)
 	defer func() {
 		ticker.Stop()
 	}()
@@ -98,6 +109,7 @@ func (s *subscribe) monitorProgress() {
 			return
 		case nowTime := <-ticker.C:
 			if s.progress.isTimeout(nowTime) {
+				logrus.Errorf("progress 接收超时 nowTime:%s, progressTime:%s", nowTime.String(), s.progress.nextTime.String())
 				s.cli.sendChan <- s.reqCache
 			}
 		}
